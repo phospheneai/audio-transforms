@@ -350,7 +350,6 @@ compare_audio(audio, augmented, sr, title_before="Original", title_after="Augmen
 plt.show()
 ```
 
-![compare_audio layout](https://via.placeholder.com/800x300?text=Waveform+%7C+Spectrogram+comparison)
 
 ### Playback
 
@@ -388,7 +387,7 @@ audio_info(audio, sr, label="Original")
 ## Demo
 
 ```bash
-python demo.py path/to/audio.wav [path/to/noise/dir]
+ check notebooks/demo.ipynb to get to know how to use 
 ```
 
 The demo runs the full pipeline, prints audio info before and after, displays a `compare_audio` figure, and plays both clips.
