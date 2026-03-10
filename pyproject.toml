@@ -1,0 +1,51 @@
+[tool.poetry]
+name = "authtransforms"
+version = "0.1.0"
+description = "Audio augmentation pipeline for PyTorch — a torchvision-style Compose API for audio tensors."
+authors = []
+readme = "README.md"
+license = "MIT"
+packages = [{ include = "authtransforms", from = "src" }]
+keywords = ["audio", "augmentation", "pytorch", "torchaudio", "deep-learning", "speech"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Intended Audience :: Science/Research",
+]
+
+[tool.poetry.dependencies]
+python = "^3.9"
+torch = ">=2.0"
+torchaudio = ">=2.0"
+matplotlib = ">=3.6"
+numpy = ">=1.24"
+soundfile = ">=0.12"
+jupyterlab = "^4.5.5"
+
+[tool.poetry.group.notebook.dependencies]
+ipython = ">=8.0"
+jupyter = ">=1.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = ">=7.0"
+ruff = ">=0.4"
+mypy = ">=1.0"
+
+[tool.poetry.scripts]
+authtransforms-demo = "authtransforms.demo:main"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.mypy]
+python_version = "3.9"
+ignore_missing_imports = true
