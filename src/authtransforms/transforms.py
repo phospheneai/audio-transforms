@@ -338,3 +338,12 @@ class ToMono:
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}()"
+
+class DummyTransform:
+    """A dummy transform that does nothing. Useful for testing and debugging."""
+
+    def __call__(self, audio: torch.Tensor) -> torch.Tensor:
+        return audio
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}()" 
