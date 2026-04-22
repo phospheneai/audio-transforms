@@ -14,6 +14,9 @@ import random
 import torch
 import torchaudio
 import torchaudio.transforms as T
+import tempfile
+import random
+import subprocess
 
 
 # ---------------------------------------------------------------------------
@@ -71,7 +74,7 @@ class RandomSpeedChange:
         if speed_factor == 1.0:
             return audio
 
-        sox_effects = [                                  #This is the sox effect that changes                                                                                                                  the speed and sample_rate of the audio
+        sox_effects = [                                  #This is the sox effect that changes the speed and sample_rate of the audio
             ["speed", str(speed_factor)],
             ["rate", str(self.sample_rate)],
         ]
@@ -125,7 +128,7 @@ class RandomBackgroundNoise:
             repeats = math.ceil(audio_length / noise_length)
             noise = noise.repeat(1, repeats)[..., :audio_length]
 
-        snr_db = random.uniform(self.min_snr_db, self.max_snr_db   #The snr defines whether the noise or audio is gonna dominate , high snr signal                                                                     dominates, whereas low snr noise dominates
+        snr_db = random.uniform(self.min_snr_db, self.max_snr_db)   #The snr defines whether the noise or audio is gonna dominate , high snr signal                                                                     dominates, whereas low snr noise dominates
         snr = math.exp(snr_db / 10)
         audio_power = audio.norm(p=2)          #Computing both the audio and noise power
         noise_power = noise.norm(p=2)
@@ -151,7 +154,7 @@ class RandomPitchShift:
         semitones: Range tuple (min, max) of semitone shifts.
     """
 
-    def __init__(self, sample_rate: int, semitones: tuple = (-2, 2)):  #Semitone is the                                                                      range of pitchshift
+    def __init__(self, sample_rate: int, semitones: tuple = (-2, 2)):  #Semitone is the range of pitchshift
         self.sample_rate = sample_rate
         self.semitones = semitones
 
@@ -183,7 +186,7 @@ class RandomGain:
 
     def __call__(self, audio: torch.Tensor) -> torch.Tensor:
         gain_db = random.uniform(self.min_gain_db, self.max_gain_db)   # This is to make the audio louder or quieter
-        gain = 10 ** (gain_db / 20        #This is the formula that changes the amplitude to linear scales and multiply with audio. 
+        gain = 10 ** (gain_db / 20 )       #This is the formula that changes the amplitude to linear scales and multiply with audio. 
         return audio * gain
 
     def __repr__(self) -> str:
@@ -341,3 +344,87 @@ class ToMono:
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}()"
+
+class CodecAugmentation:
+    """Apply random lossy codec compression (AAC, MP3, Opus, Vorbis, G.722).
+
+    Args:
+        sample_rate: Sample rate of the audio.
+        codecs: Sequence of codecs to sample from.
+        p: Probability of applying augmentation.
+        bitrate_range: Sequence of bitrates (bps) to choose from.
+        mp3_vbr_prob: Probability of using VBR for MP3.
+    """
+
+    def __init__(
+        self,
+        sample_rate: int,
+        codecs: tuple = ("aac", "mp3", "opus", "vorbis","g722"),
+        p: float = 0.5,
+        bitrate_range: tuple = (12000, 16000, 24000, 32000),
+        mp3_vbr_prob: float = 0.3,
+    ):
+        self.sample_rate = sample_rate
+        self.codecs = list(codecs)
+        self.p = p
+        self.bitrate_range = list(bitrate_range)
+        self.mp3_vbr_prob = mp3_vbr_prob
+
+        self.codec_map = {
+            "aac": ("aac", ".m4a"),
+            "mp3": ("libmp3lame", ".mp3"),
+            "opus": ("libopus", ".ogg"),
+            "vorbis": ("libvorbis", ".ogg"),
+            "g722": ("g722", ".g722"),
+        }
+
+    def __call__(self, audio: torch.Tensor) -> torch.Tensor:
+        if random.random() > self.p:
+            return audio
+
+        codec = random.choice(self.codecs)
+        encoder, ext = self.codec_map[codec]
+        bitrate = random.choice(self.bitrate_range)
+        target_sr = 8000 if codec == "g722" else self.sample_rate
+
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as src, \
+             tempfile.NamedTemporaryFile(suffix=ext, delete=False) as enc, \
+             tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as dec:
+
+            try:
+                torchaudio.save(src.name, audio, self.sample_rate)
+
+                # Encode with ffmpeg
+                cmd = [
+                    "ffmpeg", "-y",
+                    "-i", src.name,
+                    "-ar", str(target_sr),
+                    "-c:a", encoder,
+                ]
+
+                if codec == "mp3" and random.random() < self.mp3_vbr_prob:
+                    cmd += ["-q:a", str(random.randint(2, 6))]
+                else:
+                    cmd += ["-b:a", str(bitrate)]
+
+                cmd.append(enc.name)
+                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+
+                # Decode back to WAV
+                subprocess.run([
+                    "ffmpeg", "-y",
+                    "-i", enc.name,
+                    "-ar", str(self.sample_rate),
+                    dec.name
+                ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+
+                augmented, _ = torchaudio.load(dec.name)
+                return augmented
+
+            finally:
+                for f in [src.name, enc.name, dec.name]:
+                    if os.path.exists(f):
+                        os.remove(f)
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}(sample_rate={self.sample_rate}, codecs={self.codecs}, p={self.p})"
