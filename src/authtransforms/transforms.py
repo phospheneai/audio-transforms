@@ -17,6 +17,7 @@ import torchaudio.transforms as T
 import tempfile
 import random
 import subprocess
+import scipy.signal
 
 
 # ---------------------------------------------------------------------------
@@ -428,3 +429,50 @@ class CodecAugmentation:
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(sample_rate={self.sample_rate}, codecs={self.codecs}, p={self.p})"
+    
+class FilterAugmentation:
+    """Apply a band-pass filter to simulate speech frequency range.
+    Args:
+        sample_rate: Sample rate of the audio.
+        low_hz: Lower cutoff frequency in Hz.
+        high_hz: Upper cutoff frequency in Hz.
+        p: Probability of applying augmentation.
+    """
+    def __init__(
+        self,
+        sample_rate: int,
+        low_hz: float = 50.0,
+        high_hz: float = 7000.0,
+        p: float = 0.5,
+    ):
+        self.sample_rate = sample_rate
+        self.low_hz = low_hz
+        self.high_hz = high_hz
+        self.p = p
+
+    def __call__(self, audio: torch.Tensor) -> torch.Tensor:
+        if random.random() > self.p:
+            return audio
+
+        # Normalise cutoffs to [0, 1] where 1 = Nyquist frequency
+        nyquist = self.sample_rate / 2
+        low = self.low_hz / nyquist
+        high = self.high_hz / nyquist
+
+        # Design a Butterworth band-pass filter
+        sos = scipy.signal.butter(
+            N=4,                        # filter order
+            Wn=[low, high],
+            btype="bandpass",
+            output="sos"                # numerically stable form
+        )
+
+        # Apply filter to each channel
+        audio_np = audio.numpy()
+        filtered = scipy.signal.sosfiltfilt(sos, audio_np)  # zero-phase filtering
+        filtered = filtered.copy()
+        return torch.from_numpy(filtered).float()
+
+    def __repr__(self) -> str:
+        return (f"{self.__class__.__name__}("
+                f"low_hz={self.low_hz}, high_hz={self.high_hz}, p={self.p})")
