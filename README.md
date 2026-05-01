@@ -29,8 +29,14 @@ poetry --version
 ### Step 1 — Clone the repo
 
 ```bash
-git clone https://github.com/your-username/authtransforms.git
+git clone https://github.com/phospheneai/audio-transforms.git
 cd authtransforms
+```
+### step 2.a - install poetry shell 
+```bash 
+poetry self add poetry-plugin-shell
+
+poetry shell 
 ```
 
 ### Step 2 — Install dependencies
