@@ -18,7 +18,6 @@ Example
 
 import random
 from typing import Callable, List, Optional, Sequence
-
 import torch
 
 
@@ -38,7 +37,11 @@ class Compose:
         augmented = pipeline(audio)
     """
 
-    def __init__(self, transforms: List[Callable]):
+    def __init__(self, transforms: List[Callable]): 
+        
+        # The class where all the transforms are applied to the audio
+
+        # The List[Callable] indicates that the transforms variable should have a list of callable funcations
         self.transforms = transforms
 
     def __call__(self, audio: torch.Tensor) -> torch.Tensor:
@@ -76,15 +79,15 @@ class OneOf:
         ])
     """
 
-    def __init__(self, transforms: List[Callable], weights: Optional[List[float]] = None):
+    def __init__(self, transforms: List[Callable], weights: Optional[List[float]] = None): #The weights of randomly chosen transforms are stored
         self.transforms = transforms
         self.weights = weights
 
     def __call__(self, audio: torch.Tensor) -> torch.Tensor:
         if self.weights:
-            t = random.choices(self.transforms, weights=self.weights, k=1)[0]
+            t = random.choices(self.transforms, weights=self.weights, k=1)[0] #if there are weights
         else:
-            t = random.choice(self.transforms)
+            t = random.choice(self.transforms)  #if there's no weight
         return t(audio)
 
     def __repr__(self) -> str:
@@ -113,15 +116,18 @@ class SomeOf:
         ], n=2)
     """
 
+    # chooses n random transforms from a list and applies them sequentially to an audio tensor.
+
     def __init__(self, transforms: List[Callable], n: int = 2, shuffle: bool = True):
         if n > len(transforms):
             raise ValueError(f"n={n} exceeds number of transforms ({len(transforms)})")
         self.transforms = transforms
         self.n = n
         self.shuffle = shuffle
-
+        
+    # Makes the object callable like a function
     def __call__(self, audio: torch.Tensor) -> torch.Tensor:
-        selected = random.sample(self.transforms, self.n)
+        selected = random.sample(self.transforms, self.n)  #selects n random transforms
         if self.shuffle:
             random.shuffle(selected)
         for t in selected:
@@ -147,8 +153,8 @@ class RandomOrder:
         self.transforms = transforms
 
     def __call__(self, audio: torch.Tensor) -> torch.Tensor:
-        order = list(self.transforms)
-        random.shuffle(order)
+        order = list(self.transforms)   # The transforms is copied in the order 
+        random.shuffle(order)           # Then shuffled and applied to the audio
         for t in order:
             audio = t(audio)
         return audio
@@ -164,7 +170,7 @@ class RandomOrder:
 class Identity:
     """Pass-through transform — returns the audio unchanged.  Useful as a no-op placeholder."""
 
-    def __call__(self, audio: torch.Tensor) -> torch.Tensor:
+    def __call__(self, audio: torch.Tensor) -> torch.Tensor:   #Identity is a transform that returns the input audio unchanged, mainly used as a placeholder or optional "do nothing" step in augmentation pipelines.
         return audio
 
     def __repr__(self) -> str:
@@ -178,7 +184,7 @@ class Lambda:
 
         double = Lambda(lambda x: x * 2, name="Double")
     """
-
+    # To add custom augmentation and convert it into a transform
     def __init__(self, func: Callable, name: str = "Lambda"):
         self.func = func
         self.name = name

@@ -14,6 +14,10 @@ import random
 import torch
 import torchaudio
 import torchaudio.transforms as T
+import tempfile
+import random
+import subprocess
+import scipy.signal
 
 
 # ---------------------------------------------------------------------------
@@ -35,12 +39,13 @@ class RandomClip:
     def __init__(self, sample_rate: int, clip_length: int, vad: bool = True, vad_trigger_level: float = 7.0):
         self.clip_length = clip_length
         self.vad = T.Vad(sample_rate=sample_rate, trigger_level=vad_trigger_level) if vad else None
+        #VAD is Voice Activity Detection
 
     def __call__(self, audio: torch.Tensor) -> torch.Tensor:
         audio_length = audio.shape[-1]
         if audio_length > self.clip_length:
-            offset = random.randint(0, audio_length - self.clip_length)
-            audio = audio[..., offset : offset + self.clip_length]
+            offset = random.randint(0, audio_length - self.clip_length) #to select random int position where offset is the int
+            audio = audio[..., offset : offset + self.clip_length]  #Torch slicing
         if self.vad is not None:
             audio = self.vad(audio)
         return audio
@@ -70,7 +75,7 @@ class RandomSpeedChange:
         if speed_factor == 1.0:
             return audio
 
-        sox_effects = [
+        sox_effects = [                                  #This is the sox effect that changes the speed and sample_rate of the audio
             ["speed", str(speed_factor)],
             ["rate", str(self.sample_rate)],
         ]
@@ -99,17 +104,17 @@ class RandomBackgroundNoise:
         self.max_snr_db = max_snr_db
 
         noise_path = pathlib.Path(noise_dir)
-        if not noise_path.exists():
-            raise IOError(f"Noise directory `{noise_dir}` does not exist")
-        self.noise_files = list(noise_path.glob("**/*.wav"))
+        if not noise_path.exists():                                #To check if the noise path exists
+            raise IOError(f"Noise directory `{noise_dir}` does not exist") 
+        self.noise_files = list(noise_path.glob("**/*.wav"))                # Find all the files inside the noise path
         if not self.noise_files:
             raise IOError(f"No .wav files found in `{noise_dir}`")
 
     def __call__(self, audio: torch.Tensor) -> torch.Tensor:
         noise_file = random.choice(self.noise_files)
         effects = [
-            ["remix", "1"],              # convert to mono
-            ["rate", str(self.sample_rate)],  # resample
+            ["remix", "1"],              # convert to mono (noise)
+            ["rate", str(self.sample_rate)],  # resample (noise)
         ]
         noise, _ = torchaudio.sox_effects.apply_effects_file(noise_file, effects, normalize=True)
 
@@ -117,20 +122,20 @@ class RandomBackgroundNoise:
         noise_length = noise.shape[-1]
 
         if noise_length > audio_length:
-            offset = random.randint(0, noise_length - audio_length)
+            offset = random.randint(0, noise_length - audio_length)  #To make the noise length equal to audio length
             noise = noise[..., offset : offset + audio_length]
         elif noise_length < audio_length:
             # tile noise to cover the audio
             repeats = math.ceil(audio_length / noise_length)
             noise = noise.repeat(1, repeats)[..., :audio_length]
 
-        snr_db = random.uniform(self.min_snr_db, self.max_snr_db)
+        snr_db = random.uniform(self.min_snr_db, self.max_snr_db)   #The snr defines whether the noise or audio is gonna dominate , high snr signal                                                                     dominates, whereas low snr noise dominates
         snr = math.exp(snr_db / 10)
-        audio_power = audio.norm(p=2)
+        audio_power = audio.norm(p=2)          #Computing both the audio and noise power
         noise_power = noise.norm(p=2)
         scale = snr * noise_power / (audio_power + 1e-9)
 
-        return (scale * audio + noise) / 2
+        return (scale * audio + noise) / 2    #Mix the audio and noise
 
     def __repr__(self) -> str:
         return (
@@ -141,6 +146,8 @@ class RandomBackgroundNoise:
 
 
 class RandomPitchShift:
+
+    # This changes the depth of the voice , variation in male/female/child voices
     """Shift audio pitch by a random number of semitones.
 
     Args:
@@ -148,7 +155,7 @@ class RandomPitchShift:
         semitones: Range tuple (min, max) of semitone shifts.
     """
 
-    def __init__(self, sample_rate: int, semitones: tuple = (-2, 2)):
+    def __init__(self, sample_rate: int, semitones: tuple = (-2, 2)):  #Semitone is the range of pitchshift
         self.sample_rate = sample_rate
         self.semitones = semitones
 
@@ -156,7 +163,7 @@ class RandomPitchShift:
         n = random.uniform(*self.semitones)
         if n == 0:
             return audio
-        sox_effects = [["pitch", str(int(n * 100))], ["rate", str(self.sample_rate)]]
+        sox_effects = [["pitch", str(int(n * 100))], ["rate", str(self.sample_rate)]] #1 semitone = 100 cents and the sample rate is resampled to original
         transformed, _ = torchaudio.sox_effects.apply_effects_tensor(
             audio, self.sample_rate, sox_effects
         )
@@ -179,8 +186,8 @@ class RandomGain:
         self.max_gain_db = max_gain_db
 
     def __call__(self, audio: torch.Tensor) -> torch.Tensor:
-        gain_db = random.uniform(self.min_gain_db, self.max_gain_db)
-        gain = 10 ** (gain_db / 20)
+        gain_db = random.uniform(self.min_gain_db, self.max_gain_db)   # This is to make the audio louder or quieter
+        gain = 10 ** (gain_db / 20 )       #This is the formula that changes the amplitude to linear scales and multiply with audio. 
         return audio * gain
 
     def __repr__(self) -> str:
@@ -196,12 +203,12 @@ class AddGaussianNoise:
     """
 
     def __init__(self, min_amplitude: float = 0.001, max_amplitude: float = 0.015):
-        self.min_amplitude = min_amplitude
-        self.max_amplitude = max_amplitude
+        self.min_amplitude = min_amplitude         #min strength of noise
+        self.max_amplitude = max_amplitude         #max strength of noise
 
     def __call__(self, audio: torch.Tensor) -> torch.Tensor:
         amplitude = random.uniform(self.min_amplitude, self.max_amplitude)
-        noise = torch.randn_like(audio) * amplitude
+        noise = torch.randn_like(audio) * amplitude   #randn_like generates random values 
         return audio + noise
 
     def __repr__(self) -> str:
@@ -339,11 +346,133 @@ class ToMono:
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}()"
 
-class DummyTransform:
-    """A dummy transform that does nothing. Useful for testing and debugging."""
+class CodecAugmentation:
+    """Apply random lossy codec compression (AAC, MP3, Opus, Vorbis, G.722).
+
+    Args:
+        sample_rate: Sample rate of the audio.
+        codecs: Sequence of codecs to sample from.
+        p: Probability of applying augmentation.
+        bitrate_range: Sequence of bitrates (bps) to choose from.
+        mp3_vbr_prob: Probability of using VBR for MP3.
+    """
+
+    def __init__(
+        self,
+        sample_rate: int,
+        codecs: tuple = ("aac", "mp3", "opus", "vorbis","g722"),
+        p: float = 0.5,
+        bitrate_range: tuple = (12000, 16000, 24000, 32000),
+        mp3_vbr_prob: float = 0.3,
+    ):
+        self.sample_rate = sample_rate
+        self.codecs = list(codecs)
+        self.p = p
+        self.bitrate_range = list(bitrate_range)
+        self.mp3_vbr_prob = mp3_vbr_prob
+
+        self.codec_map = {
+            "aac": ("aac", ".m4a"),
+            "mp3": ("libmp3lame", ".mp3"),
+            "opus": ("libopus", ".ogg"),
+            "vorbis": ("libvorbis", ".ogg"),
+            "g722": ("g722", ".g722"),
+        }
 
     def __call__(self, audio: torch.Tensor) -> torch.Tensor:
-        return audio
+        if random.random() > self.p:
+            return audio
+
+        codec = random.choice(self.codecs)
+        encoder, ext = self.codec_map[codec]
+        bitrate = random.choice(self.bitrate_range)
+        target_sr = 8000 if codec == "g722" else self.sample_rate
+
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as src, \
+             tempfile.NamedTemporaryFile(suffix=ext, delete=False) as enc, \
+             tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as dec:
+
+            try:
+                torchaudio.save(src.name, audio, self.sample_rate)
+
+                # Encode with ffmpeg
+                cmd = [
+                    "ffmpeg", "-y",
+                    "-i", src.name,
+                    "-ar", str(target_sr),
+                    "-c:a", encoder,
+                ]
+
+                if codec == "mp3" and random.random() < self.mp3_vbr_prob:
+                    cmd += ["-q:a", str(random.randint(2, 6))]
+                else:
+                    cmd += ["-b:a", str(bitrate)]
+
+                cmd.append(enc.name)
+                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+
+                # Decode back to WAV
+                subprocess.run([
+                    "ffmpeg", "-y",
+                    "-i", enc.name,
+                    "-ar", str(self.sample_rate),
+                    dec.name
+                ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+
+                augmented, _ = torchaudio.load(dec.name)
+                return augmented
+
+            finally:
+                for f in [src.name, enc.name, dec.name]:
+                    if os.path.exists(f):
+                        os.remove(f)
 
     def __repr__(self) -> str:
-        return f"{self.__class__.__name__}()" 
+        return f"{self.__class__.__name__}(sample_rate={self.sample_rate}, codecs={self.codecs}, p={self.p})"
+    
+class FilterAugmentation:
+    """Apply a band-pass filter to simulate speech frequency range.
+    Args:
+        sample_rate: Sample rate of the audio.
+        low_hz: Lower cutoff frequency in Hz.
+        high_hz: Upper cutoff frequency in Hz.
+        p: Probability of applying augmentation.
+    """
+    def __init__(
+        self,
+        sample_rate: int,
+        low_hz: float = 50.0,
+        high_hz: float = 7000.0,
+        p: float = 0.5,
+    ):
+        self.sample_rate = sample_rate
+        self.low_hz = low_hz
+        self.high_hz = high_hz
+        self.p = p
+
+    def __call__(self, audio: torch.Tensor) -> torch.Tensor:
+        if random.random() > self.p:
+            return audio
+
+        # Normalise cutoffs to [0, 1] where 1 = Nyquist frequency
+        nyquist = self.sample_rate / 2
+        low = self.low_hz / nyquist
+        high = self.high_hz / nyquist
+
+        # Design a Butterworth band-pass filter
+        sos = scipy.signal.butter(
+            N=4,                        # filter order
+            Wn=[low, high],
+            btype="bandpass",
+            output="sos"                # numerically stable form
+        )
+
+        # Apply filter to each channel
+        audio_np = audio.numpy()
+        filtered = scipy.signal.sosfiltfilt(sos, audio_np)  # zero-phase filtering
+        filtered = filtered.copy()
+        return torch.from_numpy(filtered).float()
+
+    def __repr__(self) -> str:
+        return (f"{self.__class__.__name__}("
+                f"low_hz={self.low_hz}, high_hz={self.high_hz}, p={self.p})")
