@@ -257,15 +257,23 @@ def _play_notebook(
     label: str = "Audio",
     autoplay: bool = False,
 ) -> None:
-    """Render an HTML5 audio widget in a Jupyter notebook cell."""
-    try:
-        from IPython.display import Audio, display, HTML
-    except ImportError:
-        raise ImportError("IPython is required for notebook playback: pip install ipython")
+    import soundfile as sf
+    import tempfile
+    import os
+    from IPython.display import Audio, display, HTML
 
-    wav_bytes = _tensor_to_wav_bytes(audio, sample_rate)
-    display(HTML(f"<b>{label}</b>"))
-    display(Audio(data=wav_bytes, rate=sample_rate, autoplay=autoplay))
+    # write to a temp file — soundfile has no BytesIO issues
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+        tmp_path = f.name
+
+    audio_np = audio.numpy()
+    if audio_np.ndim == 2:
+        audio_np = audio_np.T  # (channels, samples) → (samples, channels)
+
+    sf.write(tmp_path, audio_np, sample_rate)
+    display(HTML(f"<p><b>{label}</b></p>"))
+    display(Audio(tmp_path, autoplay=autoplay))
+    os.unlink(tmp_path)
 
 
 def _play_script(audio: torch.Tensor, sample_rate: int) -> None:
@@ -338,3 +346,19 @@ def audio_info(audio: torch.Tensor, sample_rate: int, label: str = "Audio") -> N
     print(f"  Peak       : {peak:.4f}")
     print(f"  RMS        : {rms:.4f}  ({rms_db:.1f} dBFS)")
     print(f"  dtype      : {audio.dtype}")
+    
+def save_audio(audio: torch.Tensor, sample_rate: int, path: str = "output.wav") -> str:
+    """
+    Save a torch audio tensor to a .wav file.
+
+    Args:
+        audio:       Audio tensor of shape (channels, samples)
+        sample_rate: Sample rate of the audio
+        path:        Output file path (default: output.wav)
+
+    Returns:
+        Absolute path of the saved file
+    """
+    import soundfile as sf
+    sf.write(path, audio.numpy().T, sample_rate)
+    print(f"Saved → {path}")

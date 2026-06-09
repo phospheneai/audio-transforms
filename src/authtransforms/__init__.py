@@ -17,6 +17,8 @@ from .transforms import (
     SpecAugment,
     TimeShift,
     ToMono,
+    RoomImpulseResponse,
+    TimeStretch,
 )
 from .utils import (
     audio_info,
@@ -26,6 +28,7 @@ from .utils import (
     plot_audio,
     plot_spectrogram,
     plot_waveform,
+    save_audio,
 )
 
 __all__ = [
@@ -48,6 +51,7 @@ __all__ = [
     "RandomApply",
     "Normalize",
     "ToMono",
+    "RoomImpulseResponse",
     # Utilities
     "plot_waveform",
     "plot_spectrogram",
@@ -56,4 +60,6 @@ __all__ = [
     "play_audio",
     "compare_play",
     "audio_info",
+    "save_audio",
+    "TimeStretch",
 ]
