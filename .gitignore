@@ -55,3 +55,4 @@ musan/
 # Env files
 .env
 .env.*
+*.tar.bz2

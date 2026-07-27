@@ -18,6 +18,12 @@ import tempfile
 import random
 import subprocess
 import scipy.signal
+import numpy as np
+from pathlib import Path
+from scipy.signal import fftconvolve
+import numpy as np
+import librosa
+
 
 
 # ---------------------------------------------------------------------------
@@ -476,3 +482,167 @@ class FilterAugmentation:
     def __repr__(self) -> str:
         return (f"{self.__class__.__name__}("
                 f"low_hz={self.low_hz}, high_hz={self.high_hz}, p={self.p})")
+    
+    
+class RoomImpulseResponse:
+    """
+    Convolve audio with a randomly sampled Room Impulse Response (RIR).
+
+    Args:
+        rir_dir:        Directory containing .wav RIR files.
+        sample_rate:    Expected sample rate of audio and RIR files.
+        normalize:      Normalise output to prevent clipping after convolution.
+        p:              Probability of applying augmentation.
+    """
+    def __init__(
+        self,
+        rir_dir: str,
+        sample_rate: int,
+        normalize: bool = True,
+        p: float = 0.5,
+    ):
+        self.sample_rate = sample_rate
+        self.normalize = normalize
+        self.p = p
+
+        # Pre-load all RIR paths at init — avoids repeated filesystem scans
+        self.rir_paths = list(Path(rir_dir).rglob("*.wav"))
+        if not self.rir_paths:
+            raise ValueError(f"No .wav files found in {rir_dir}")
+
+    def _load_rir(self, path: Path) -> np.ndarray:
+        import soundfile as sf
+        rir, sr = sf.read(path, always_2d=True)  # (samples, channels)
+        rir = rir.T                               # → (channels, samples)
+        if sr != self.sample_rate:
+            rir = librosa.resample(rir, orig_sr=sr, target_sr=self.sample_rate)
+        return rir.astype(np.float32)
+
+    def __call__(self, audio: torch.Tensor) -> torch.Tensor:
+        if random.random() > self.p:
+            return audio
+
+        rir_path = random.choice(self.rir_paths)
+        rir = self._load_rir(rir_path)
+
+        audio_np = audio.numpy()                  # (channels, samples)
+
+        # Match channel count — mono RIR applied to stereo audio
+        if rir.shape[0] == 1 and audio_np.shape[0] > 1:
+            rir = np.repeat(rir, audio_np.shape[0], axis=0)
+        elif rir.shape[0] > audio_np.shape[0]:
+            rir = rir[:audio_np.shape[0]]
+
+        # Convolve each channel independently
+        convolved = np.stack([
+            fftconvolve(audio_np[c], rir[c])[:audio_np.shape[1]]
+            for c in range(audio_np.shape[0])
+        ])
+
+        # Normalise to original peak — convolution can cause large amplitude spikes
+        if self.normalize:
+            peak = np.abs(convolved).max()
+            if peak > 0:
+                original_peak = np.abs(audio_np).max()
+                convolved = convolved * (original_peak / peak)
+
+        return torch.from_numpy(convolved).float()
+
+    def __repr__(self) -> str:
+        return (f"{self.__class__.__name__}("
+                f"rir_dir='{self.rir_paths[0].parent}', "
+                f"n_rirs={len(self.rir_paths)}, p={self.p})")
+    
+class TimeStretch:
+    """
+    Stretch or compress audio in time without changing pitch.
+    Uses a phase vocoder via librosa.
+
+    Args:
+        min_rate: Minimum stretch rate (< 1.0 = slower, longer audio).
+        max_rate: Maximum stretch rate (> 1.0 = faster, shorter audio).
+        p:        Probability of applying augmentation.
+    """
+    def __init__(
+        self,
+        min_rate: float = 0.8,
+        max_rate: float = 1.25,
+        p: float = 0.5,
+    ):
+        if min_rate <= 0 or max_rate <= 0:
+            raise ValueError("Rates must be positive")
+        if min_rate > max_rate:
+            raise ValueError("min_rate must be <= max_rate")
+        
+        self.min_rate = min_rate
+        self.max_rate = max_rate
+        self.p = p
+
+    def __call__(self, audio: torch.Tensor) -> torch.Tensor:
+        if random.random() > self.p:
+            return audio
+
+        rate = random.uniform(self.min_rate, self.max_rate)
+
+        audio_np = audio.numpy()  # (channels, samples)
+
+        # Stretch each channel independently
+        stretched = np.stack([
+            librosa.effects.time_stretch(audio_np[c], rate=rate)
+            for c in range(audio_np.shape[0])
+        ])
+
+        return torch.from_numpy(stretched).float()
+
+    def __repr__(self) -> str:
+        return (f"{self.__class__.__name__}("
+                f"min_rate={self.min_rate}, max_rate={self.max_rate}, p={self.p})")
+    
+class ResampleAugmentation:
+    """
+    Simulate bandwidth degradation by resampling to an intermediate
+    sample rate and back.
+
+    Args:
+        original_freq:      Sample rate of the input audio.
+        target_freq:        Intermediate sample rate to resample to.
+                            Lower = ResampleDown, Higher = ResampleUp.
+        p:                  Probability of applying augmentation.
+    """
+    def __init__(
+        self,
+        original_freq: int,
+        target_freq: int,
+        p: float = 0.5,
+    ):
+        self.original_freq = original_freq
+        self.target_freq = target_freq
+        self.p = p
+
+    def __call__(self, audio: torch.Tensor) -> torch.Tensor:
+        if random.random() > self.p:
+            return audio
+
+        # Step 1: resample to intermediate rate
+        degraded = torchaudio.functional.resample(
+            audio,
+            orig_freq=self.original_freq,
+            new_freq=self.target_freq,
+        )
+
+        # Step 2: resample back to original rate
+        restored = torchaudio.functional.resample(
+            degraded,
+            orig_freq=self.target_freq,
+            new_freq=self.original_freq,
+        )
+
+        return restored
+
+    def __repr__(self) -> str:
+        direction = "Down" if self.target_freq < self.original_freq else "Up"
+        return (
+            f"{self.__class__.__name__}(Resample{direction}, "
+            f"{self.original_freq}Hz → {self.target_freq}Hz → {self.original_freq}Hz, "
+            f"p={self.p})"
+        )
